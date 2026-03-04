@@ -12,9 +12,10 @@ MVP foundation for Nutrition Tracker based on FastAPI + SQLite + SQLModel.
 
 ## Setup
 
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -29,7 +30,7 @@ This creates `nutrition.db` in project root.
 ## Run API
 
 ```bash
-uvicorn app.main:app --reload --port 8090
+uvicorn app.main:app --reload --port 8086
 ```
 
 Health check:
@@ -45,5 +46,10 @@ Health check:
 Example:
 
 ```bash
-curl -H "Authorization: Bearer TEST1234" http://127.0.0.1:8090/me
+curl -H "Authorization: Bearer TEST1234" http://mdtest:8090/me
 ```
+
+supervisorctl -c ~/tools2/supervisor.conf reread
+supervisorctl -c ~/tools2/supervisor.conf update
+supervisorctl -c ~/tools2/supervisor.conf status
+curl -i http://127.0.0.1:8086/health
