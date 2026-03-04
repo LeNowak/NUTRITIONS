@@ -38,7 +38,7 @@ class Meal(SQLModel, table=True):
     total_protein: float = Field(default=0, ge=0)
     created_at: DateTimeType = Field(default_factory=DateTimeType.utcnow, index=True)
 
-    items: List[MealItem] = Relationship(back_populates="meal")
+    items: List["MealItem"] = Relationship(back_populates="meal")
 
 
 class MealItem(SQLModel, table=True):
