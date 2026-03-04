@@ -25,7 +25,7 @@ pip install -r requirements.txt
 python scripts/init_db.py
 ```
 
-This creates `nutrition.db` in project root.
+This c
 
 ## Run API
 
