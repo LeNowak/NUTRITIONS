@@ -1,10 +1,10 @@
 # Nutrition Tracker API
 
-MVP foundation for Nutrition Tracker based on FastAPI + SQLite + SQLModel.
+MVP foundation for Nutrition Tracker based on Flask + SQLite + SQLModel.
 
 ## Stage 1 scope
 
-- FastAPI project initialized.
+- Flask API project initialized.
 - SQLite schema for `users`, `foods`, `meals`, `meal_items`.
 - DB init + seed script with:
   - test user: `TEST1234`
@@ -30,7 +30,7 @@ This c
 ## Run API
 
 ```bash
-uvicorn app.main:app --reload --port 8086
+python -m app.main
 ```
 
 Health check:
@@ -54,3 +54,6 @@ supervisorctl -c ~/tools2/supervisor.conf update
 supervisorctl -c ~/tools2/supervisor.conf status
 supervisorctl -c ~/tools2/supervisor.conf restart testb
 curl -i http://127.0.0.1:8086/health
+
+C:/PROJECTS/NUTRITIONS/.venv/Scripts/Activate.ps1
+python scripts/init_db.py

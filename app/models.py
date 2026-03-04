@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import date as DateType
 from datetime import datetime as DateTimeType
 from datetime import time as TimeType
-from typing import List, Optional
+from typing import Optional
 
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, SQLModel
 
 
 class User(SQLModel, table=True):
@@ -38,8 +38,6 @@ class Meal(SQLModel, table=True):
     total_protein: float = Field(default=0, ge=0)
     created_at: DateTimeType = Field(default_factory=DateTimeType.utcnow, index=True)
 
-    items: List["MealItem"] = Relationship(back_populates="meal")
-
 
 class MealItem(SQLModel, table=True):
     __tablename__ = "meal_items"
@@ -51,5 +49,3 @@ class MealItem(SQLModel, table=True):
     kcal: float = Field(ge=0)
     protein: float = Field(ge=0)
     matched_name: str = Field(max_length=255)
-
-    meal: Meal = Relationship(back_populates="items")
