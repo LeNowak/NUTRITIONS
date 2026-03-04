@@ -52,7 +52,8 @@ curl -H "Authorization: Bearer TEST1234" http://mdtest:8090/me
 supervisorctl -c ~/tools2/supervisor.conf reread
 supervisorctl -c ~/tools2/supervisor.conf update
 supervisorctl -c ~/tools2/supervisor.conf status
-supervisorctl -c ~/tools2/supervisor.conf restart testb
+supervisorctl -c ~/tools2/supervisor.conf restart api
+
 curl -i http://127.0.0.1:8086/health
 
 C:/PROJECTS/NUTRITIONS/.venv/Scripts/Activate.ps1

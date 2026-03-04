@@ -18,21 +18,21 @@ Ten dokument opisuje kroki niezbędne do uruchomienia podstawowej wersji systemu
 - [ ] Dependency Injection w FastAPI do pobierania `current_user` na podstawie tokena.
 
 ## Etap 3: Parser Tekstu (Core Logic)
-- [ ] Implementacja prostej logiki parsowania tekstu (regex):
+- [x] Implementacja prostej logiki parsowania tekstu (regex):
     - Wyciąganie gramatury (np. "400g").
     - Wyciąganie nazwy produktu.
-- [ ] Logika dopasowania nazwy z tekstu do bazy `foods` (proste dopasowanie po nazwie/aliasach).
-- [ ] Przeliczanie wartości odżywczych (kcal, białko) na podstawie gramatury i danych ze słownika.
+- [x] Logika dopasowania nazwy z tekstu do bazy `foods` (proste dopasowanie po nazwie/aliasach).
+- [x] Przeliczanie wartości odżywczych (kcal, białko) na podstawie gramatury i danych ze słownika.
 
 ## Etap 4: Endpointy API (MVP)
-- [ ] `POST /eat`: Przyjmuje surowy tekst, filmuje go, parsuje i zapisuje jako `meal` + `meal_items`.
-- [ ] `GET /meals`: Lista posiłków zalogowanego użytkownika (filtrowanie po `user_id`).
-- [ ] `GET /stats/today`: Podsumowanie dzisiejszych kalorii i białka.
+- [x] `POST /eat`: Przyjmuje surowy tekst, filmuje go, parsuje i zapisuje jako `meal` + `meal_items`.
+- [x] `GET /meals`: Lista posiłków zalogowanego użytkownika (filtrowanie po `user_id`).
+- [x] `GET /stats/today`: Podsumowanie dzisiejszych kalorii i białka.
 
 ## Etap 5: Prosty Interfejs (Frontend)
-- [ ] Statyczny plik HTML/JS serwowany przez FastAPI lub Nginx.
-- [ ] Pole tekstowe do wpisywania posiłków.
-- [ ] Wyświetlanie prostego podsumowania dnia.
+- [x] Statyczny plik HTML/JS serwowany przez FastAPI lub Nginx.
+- [x] Pole tekstowe do wpisywania posiłków.
+- [x] Wyświetlanie prostego podsumowania dnia.
 
 ## Etap 6: Konteneryzacja i Wdrożenie
 - [ ] Przygotowanie `Dockerfile` dla aplikacji FastAPI.

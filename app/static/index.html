@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nutrition Tracker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      max-width: 720px;
+      line-height: 1.4;
+    }
+
+    h1 {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    input,
+    textarea,
+    button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      font-size: 14px;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    button {
+      margin-top: 12px;
+      cursor: pointer;
+    }
+
+    .card {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .error {
+      color: #b00020;
+      margin-top: 10px;
+      white-space: pre-wrap;
+    }
+
+    .ok {
+      color: #0a7a2f;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Nutrition Tracker</h1>
+
+  <label for="token">Token (8 znaków)</label>
+  <input id="token" type="text" maxlength="8" placeholder="np. TEST1234" />
+
+  <label for="mealText">Wpisz posiłek</label>
+  <textarea id="mealText" placeholder="np. 400g skyr, 100g borowki"></textarea>
+
+  <button id="saveMealBtn">Zapisz posiłek</button>
+
+  <div id="message"></div>
+
+  <div class="card">
+    <h2>Podsumowanie dnia</h2>
+    <div class="row"><span>Kcal:</span> <strong id="todayKcal">0</strong></div>
+    <div class="row"><span>Białko:</span> <strong id="todayProtein">0</strong></div>
+  </div>
+
+  <script>
+    const tokenInput = document.getElementById('token');
+    const mealTextInput = document.getElementById('mealText');
+    const saveMealBtn = document.getElementById('saveMealBtn');
+    const messageBox = document.getElementById('message');
+    const todayKcal = document.getElementById('todayKcal');
+    const todayProtein = document.getElementById('todayProtein');
+
+    const TOKEN_STORAGE_KEY = 'nutrition_token';
+
+    function setMessage(text, type) {
+      messageBox.textContent = text;
+      messageBox.className = type === 'error' ? 'error' : 'ok';
+    }
+
+    function getToken() {
+      return tokenInput.value.trim().toUpperCase();
+    }
+
+    function getAuthHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getToken()}`,
+      };
+    }
+
+    async function refreshTodayStats() {
+      const token = getToken();
+      if (!token) {
+        todayKcal.textContent = '0';
+        todayProtein.textContent = '0';
+        return;
+      }
+
+      const response = await fetch('/stats/today', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Nie udało się pobrać statystyk.');
+      }
+
+      todayKcal.textContent = Number(data.kcal || 0).toFixed(1);
+      todayProtein.textContent = Number(data.protein || 0).toFixed(1);
+    }
+
+    async function saveMeal() {
+      const token = getToken();
+      const text = mealTextInput.value.trim();
+
+      if (!token) {
+        setMessage('Podaj token.', 'error');
+        return;
+      }
+
+      if (!text) {
+        setMessage('Wpisz treść posiłku.', 'error');
+        return;
+      }
+
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      setMessage('', 'ok');
+
+      const response = await fetch('/eat', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ text }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Nie udało się zapisać posiłku.');
+      }
+
+      setMessage('Posiłek zapisany.', 'ok');
+      mealTextInput.value = '';
+      await refreshTodayStats();
+    }
+
+    saveMealBtn.addEventListener('click', async () => {
+      try {
+        await saveMeal();
+      } catch (error) {
+        setMessage(error.message, 'error');
+      }
+    });
+
+    tokenInput.addEventListener('change', async () => {
+      tokenInput.value = getToken();
+      localStorage.setItem(TOKEN_STORAGE_KEY, getToken());
+      try {
+        await refreshTodayStats();
+      } catch (error) {
+        setMessage(error.message, 'error');
+      }
+    });
+
+    (async function init() {
+      const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (storedToken) {
+        tokenInput.value = storedToken.toUpperCase();
+      }
+
+      try {
+        await refreshTodayStats();
+      } catch (error) {
+        setMessage(error.message, 'error');
+      }
+    })();
+  </script>
+</body>
+</html>

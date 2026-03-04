@@ -1,12 +1,12 @@
 from datetime import date
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from sqlmodel import Session, select
 
 from app.auth import APIError, get_current_user
 from app.database import create_db_and_tables, engine
 from app.models import Food, Meal, MealItem, User
-from app.parser import parse_meal_text
+from app.parser import calculate_item_nutrition, match_food, parse_meal_text
 
 
 app = Flask(__name__)
@@ -53,6 +53,11 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.get("/")
+def index():
+    return send_from_directory(app.static_folder, "index.html")
+
+
 @app.get("/me")
 def me():
     with Session(engine) as session:
@@ -85,6 +90,25 @@ def eat():
                 detail="Could not parse any food items from text. Examples: '400g skyr', '100g borowki'.",
             )
 
+        foods = session.exec(select(Food)).all()
+        resolved_items: list[tuple[float, Food, str, float, float]] = []
+        unmatched_items: list[str] = []
+
+        for item in parsed_items:
+            match = match_food(item.food_name, foods)
+            if not match:
+                unmatched_items.append(item.food_name)
+                continue
+
+            item_kcal, item_protein = calculate_item_nutrition(match.food, item.grams)
+            resolved_items.append((item.grams, match.food, match.matched_name, item_kcal, item_protein))
+
+        if unmatched_items:
+            raise APIError(
+                status_code=422,
+                detail=f"Could not match foods from text: {', '.join(unmatched_items)}",
+            )
+
         meal = Meal(
             user_id=current_user.id,
             date=date.today(),
@@ -98,41 +122,18 @@ def eat():
 
         total_kcal = 0.0
         total_protein = 0.0
-        meal_items_to_save = []
-
-        for item in parsed_items:
-            food = session.exec(
-                select(Food).where(
-                    (Food.name.contains(item.food_name)) | (Food.aliases.contains(item.food_name))
-                )
-            ).first()
-
-            if food:
-                item_kcal = (food.kcal_per_100g * item.grams) / 100.0
-                item_protein = (food.protein_per_100g * item.grams) / 100.0
-
-                meal_item = MealItem(
-                    meal_id=meal.id,
-                    food_id=food.id,
-                    grams=item.grams,
-                    kcal=item_kcal,
-                    protein=item_protein,
-                    matched_name=food.name,
-                )
-                meal_items_to_save.append(meal_item)
-                total_kcal += item_kcal
-                total_protein += item_protein
-
-        if not meal_items_to_save:
-            session.delete(meal)
-            session.commit()
-            raise APIError(
-                status_code=404,
-                detail="No matching foods found in database.",
+        for grams, food, matched_name, item_kcal, item_protein in resolved_items:
+            meal_item = MealItem(
+                meal_id=meal.id,
+                food_id=food.id,
+                grams=grams,
+                kcal=item_kcal,
+                protein=item_protein,
+                matched_name=matched_name,
             )
-
-        for meal_item in meal_items_to_save:
             session.add(meal_item)
+            total_kcal += item_kcal
+            total_protein += item_protein
 
         meal.total_kcal = total_kcal
         meal.total_protein = total_protein
@@ -171,4 +172,4 @@ def get_stats_today():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8086, debug=True)
+    app.run(host="0.0.0.0", port=8082, debug=True)
