@@ -20,6 +20,7 @@ create_db_and_tables()
 AUTH_CODE_TTL_SECONDS = 300
 OPENAI_CALLBACK_HOSTS = {"chat.openai.com", "chatgpt.com"}
 oauth_codes: dict[str, dict[str, str | float]] = {}
+SUPPORTED_OAUTH_RESPONSE_TYPES = {"code", "authorization_code"}
 
 
 def _cleanup_oauth_codes() -> None:
@@ -61,7 +62,7 @@ def _render_oauth_authorize_form(
     escaped_redirect_uri = html.escape(redirect_uri)
     escaped_state = html.escape(state)
     escaped_client_id = html.escape(client_id)
-    escaped_response_type = html.escape(response_type or "authorization_code")
+    escaped_response_type = html.escape(response_type or "code")
 
     error_block = f"<p style='color:#b00020'>{escaped_error}</p>" if error_message else ""
 
@@ -230,7 +231,7 @@ def oauth_authorize():
     redirect_uri = request.args.get("redirect_uri", "").strip()
     state = request.args.get("state", "").strip()
     client_id = request.args.get("client_id", "").strip()
-    response_type = request.args.get("response_type", "authorization_code").strip()
+    response_type = request.args.get("response_type", "code").strip()
     token = request.args.get("token", "").strip().upper()
 
     if not redirect_uri:
@@ -239,8 +240,8 @@ def oauth_authorize():
     if not _is_allowed_redirect_uri(redirect_uri):
         return jsonify({"error": "invalid_request", "error_description": "Invalid redirect_uri."}), 400
 
-    if response_type != "authorization_code":
-        return jsonify({"error": "unsupported_response_type", "error_description": "Only authorization_code is supported."}), 400
+    if response_type not in SUPPORTED_OAUTH_RESPONSE_TYPES:
+        return jsonify({"error": "unsupported_response_type", "error_description": "Only code is supported."}), 400
 
     if not state:
         return jsonify({"error": "invalid_request", "error_description": "Missing required state parameter."}), 400

@@ -40,7 +40,7 @@ Ten dokument opisuje, jak ChatGPT powinien komunikować się z API projektu `NUT
 - Wymaga `Authorization: Bearer ...`
 
 ### `GET /oauth/authorize`
-- Cel: rozpoczęcie OAuth (`response_type=authorization_code`).
+- Cel: rozpoczęcie OAuth (`response_type=code`).
 - Wymagane parametry: `redirect_uri`, `state`.
 - Opcjonalne: `client_id`.
 - Endpoint wyświetla prostą stronę logowania z polem `TOKEN8`.
@@ -59,7 +59,7 @@ Ten dokument opisuje, jak ChatGPT powinien komunikować się z API projektu `NUT
 5. Gdy użytkownik prosi o historię, wywołaj `GET /meals`.
 
 ## 3a) OAuth dla GPT Actions
-1. GPT otwiera: `GET /oauth/authorize?response_type=authorization_code&client_id=...&redirect_uri=...&state=...`
+1. GPT otwiera: `GET /oauth/authorize?response_type=code&client_id=...&redirect_uri=...&state=...`
 2. Użytkownik wpisuje `TOKEN8` na stronie logowania.
 3. Backend przekierowuje na callback z parametrami `code` i `state`.
 4. GPT wykonuje `POST /oauth/token` i dostaje `access_token`.
@@ -105,7 +105,7 @@ curl -H "Authorization: Bearer TEST1234" https://mdtest.gembito.net/stats/today
 
 ### OAuth authorize
 ```bash
-curl "https://mdtest.gembito.net/oauth/authorize?response_type=authorization_code&client_id=test-client&redirect_uri=https%3A%2F%2Fchat.openai.com%2Faip%2Foauth%2Fcallback&state=abc123"
+curl "https://mdtest.gembito.net/oauth/authorize?response_type=code&client_id=test-client&redirect_uri=https%3A%2F%2Fchat.openai.com%2Faip%2Foauth%2Fcallback&state=abc123"
 ```
 
 ### OAuth token exchange
@@ -160,3 +160,4 @@ Przykład odpowiedzi:
 - Brak endpointu do usuwania wpisu.
 - Brak endpointów administracyjnych do zarządzania słownikiem `foods`.
 - OAuth korzysta z tymczasowych kodów trzymanych w pamięci procesu (TTL 5 minut).
+- Endpoint `/oauth/authorize` akceptuje standardowe `response_type=code` oraz tymczasowo także starsze `authorization_code` dla kompatybilności wstecznej.
