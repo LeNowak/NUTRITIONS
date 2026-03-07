@@ -1,17 +1,17 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 import html
 import os
 import secrets
-import time
 from urllib.parse import urlencode, urlparse
 
 from flask import Flask, jsonify, redirect, request, send_from_directory
 from sqlmodel import Session, select
 
+from app.ai_nutrition import estimate_food_nutrition
 from app.auth import APIError, TOKEN_PATTERN, get_current_user
 from app.database import create_db_and_tables, engine
-from app.models import Food, Meal, MealItem, User
-from app.parser import calculate_item_nutrition, match_food, parse_meal_text
+from app.models import Food, Meal, MealItem, OAuthAuthorizationCode, User
+from app.parser import calculate_item_nutrition, match_food, normalize_text, parse_meal_text
 
 
 app = Flask(__name__)
@@ -19,15 +19,19 @@ create_db_and_tables()
 
 AUTH_CODE_TTL_SECONDS = 300
 OPENAI_CALLBACK_HOSTS = {"chat.openai.com", "chatgpt.com"}
-oauth_codes: dict[str, dict[str, str | float]] = {}
 SUPPORTED_OAUTH_RESPONSE_TYPES = {"code", "authorization_code"}
+UNKNOWN_FOOD_NAME = "__unknown_food__"
 
 
-def _cleanup_oauth_codes() -> None:
-    now = time.time()
-    expired_codes = [code for code, payload in oauth_codes.items() if float(payload["expires_at"]) <= now]
-    for code in expired_codes:
-        oauth_codes.pop(code, None)
+def _cleanup_oauth_codes(session: Session) -> None:
+    now = datetime.utcnow()
+    expired_codes = session.exec(
+        select(OAuthAuthorizationCode).where(OAuthAuthorizationCode.expires_at <= now)
+    ).all()
+    for auth_code in expired_codes:
+        session.delete(auth_code)
+    if expired_codes:
+        session.commit()
 
 
 def _allowed_redirect_uris_from_env() -> set[str]:
@@ -103,6 +107,8 @@ def _meal_to_response(session: Session, meal: Meal) -> dict:
                 "grams": item.grams,
                 "kcal": item.kcal,
                 "protein": item.protein,
+                "carbs": item.carbs,
+                "fiber": item.fiber,
             }
         )
 
@@ -112,7 +118,21 @@ def _meal_to_response(session: Session, meal: Meal) -> dict:
         "raw_text": meal.raw_text,
         "total_kcal": meal.total_kcal,
         "total_protein": meal.total_protein,
+        "total_carbs": meal.total_carbs,
+        "total_fiber": meal.total_fiber,
         "items": serialized_items,
+    }
+
+
+def _food_to_response(food: Food) -> dict:
+    return {
+        "id": food.id,
+        "name": food.name,
+        "aliases": food.aliases or "",
+        "kcal_per_100g": food.kcal_per_100g,
+        "protein_per_100g": food.protein_per_100g,
+        "carbs_per_100g": food.carbs_per_100g,
+        "fiber_per_100g": food.fiber_per_100g,
     }
 
 
@@ -126,6 +146,89 @@ def handle_api_error(error: APIError):
 
 def _get_current_user_or_raise(session: Session) -> User:
     return get_current_user(request, session)
+
+
+def _get_or_create_unknown_food(session: Session) -> Food:
+    unknown_food = session.exec(select(Food).where(Food.name == UNKNOWN_FOOD_NAME)).first()
+    if unknown_food:
+        return unknown_food
+
+    unknown_food = Food(
+        name=UNKNOWN_FOOD_NAME,
+        aliases="unknown|nieznany produkt|dowolny wpis",
+        kcal_per_100g=0,
+        protein_per_100g=0,
+        carbs_per_100g=0,
+        fiber_per_100g=0,
+    )
+    session.add(unknown_food)
+    session.commit()
+    session.refresh(unknown_food)
+    return unknown_food
+
+
+def _get_food_payload() -> dict:
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    aliases = str(payload.get("aliases") or "").strip()
+
+    try:
+        kcal_per_100g = float(payload.get("kcal_per_100g"))
+        protein_per_100g = float(payload.get("protein_per_100g"))
+        carbs_per_100g = float(payload.get("carbs_per_100g") or 0)
+        fiber_per_100g = float(payload.get("fiber_per_100g") or 0)
+    except (TypeError, ValueError):
+        raise APIError(
+            status_code=422,
+            detail="kcal_per_100g, protein_per_100g, carbs_per_100g and fiber_per_100g must be numbers.",
+        )
+
+    if not name:
+        raise APIError(status_code=422, detail="Food name is required.")
+
+    if name == UNKNOWN_FOOD_NAME:
+        raise APIError(status_code=422, detail="This food name is reserved.")
+
+    if kcal_per_100g < 0 or protein_per_100g < 0 or carbs_per_100g < 0 or fiber_per_100g < 0:
+        raise APIError(status_code=422, detail="Nutrition values must be greater than or equal to zero.")
+
+    return {
+        "name": name,
+        "aliases": aliases,
+        "kcal_per_100g": kcal_per_100g,
+        "protein_per_100g": protein_per_100g,
+        "carbs_per_100g": carbs_per_100g,
+        "fiber_per_100g": fiber_per_100g,
+    }
+
+
+def _get_or_create_food_from_ai(session: Session, food_name: str) -> Food | None:
+    estimate = estimate_food_nutrition(food_name)
+    if not estimate or not estimate.normalized_name or estimate.normalized_name == UNKNOWN_FOOD_NAME:
+        return None
+
+    existing_food = session.exec(select(Food).where(Food.name == estimate.normalized_name)).first()
+    if existing_food:
+        return existing_food
+
+    aliases = [alias for alias in estimate.aliases if alias and alias != estimate.normalized_name]
+    normalized_input = normalize_text(food_name)
+    if normalized_input:
+        if normalized_input not in aliases and normalized_input != estimate.normalized_name:
+            aliases.append(normalized_input)
+
+    ai_food = Food(
+        name=estimate.normalized_name,
+        aliases="|".join(dict.fromkeys(aliases)) or None,
+        kcal_per_100g=estimate.kcal_per_100g,
+        protein_per_100g=estimate.protein_per_100g,
+        carbs_per_100g=estimate.carbs_per_100g,
+        fiber_per_100g=estimate.fiber_per_100g,
+    )
+    session.add(ai_food)
+    session.commit()
+    session.refresh(ai_food)
+    return ai_food
 
 
 @app.get("/health")
@@ -151,6 +254,78 @@ def me():
         )
 
 
+@app.get("/foods")
+def get_foods():
+    with Session(engine) as session:
+        _get_current_user_or_raise(session)
+        foods = session.exec(
+            select(Food).where(Food.name != UNKNOWN_FOOD_NAME).order_by(Food.name.asc())
+        ).all()
+        return jsonify([_food_to_response(food) for food in foods])
+
+
+@app.post("/foods", strict_slashes=False)
+def create_food():
+    payload = _get_food_payload()
+
+    with Session(engine) as session:
+        _get_current_user_or_raise(session)
+        existing_food = session.exec(select(Food).where(Food.name == payload["name"])).first()
+        if existing_food:
+            raise APIError(status_code=409, detail="Food with this name already exists.")
+
+        food = Food(**payload)
+        session.add(food)
+        session.commit()
+        session.refresh(food)
+        return jsonify(_food_to_response(food)), 201
+
+
+@app.put("/foods/<int:food_id>", strict_slashes=False)
+def update_food(food_id: int):
+    payload = _get_food_payload()
+
+    with Session(engine) as session:
+        _get_current_user_or_raise(session)
+        food = session.get(Food, food_id)
+        if not food or food.name == UNKNOWN_FOOD_NAME:
+            raise APIError(status_code=404, detail="Food not found.")
+
+        duplicate_food = session.exec(
+            select(Food).where(Food.name == payload["name"], Food.id != food_id)
+        ).first()
+        if duplicate_food:
+            raise APIError(status_code=409, detail="Another food with this name already exists.")
+
+        food.name = payload["name"]
+        food.aliases = payload["aliases"] or None
+        food.kcal_per_100g = payload["kcal_per_100g"]
+        food.protein_per_100g = payload["protein_per_100g"]
+        food.carbs_per_100g = payload["carbs_per_100g"]
+        food.fiber_per_100g = payload["fiber_per_100g"]
+        session.add(food)
+        session.commit()
+        session.refresh(food)
+        return jsonify(_food_to_response(food))
+
+
+@app.delete("/foods/<int:food_id>", strict_slashes=False)
+def delete_food(food_id: int):
+    with Session(engine) as session:
+        _get_current_user_or_raise(session)
+        food = session.get(Food, food_id)
+        if not food or food.name == UNKNOWN_FOOD_NAME:
+            raise APIError(status_code=404, detail="Food not found.")
+
+        existing_meal_item = session.exec(select(MealItem).where(MealItem.food_id == food_id)).first()
+        if existing_meal_item:
+            raise APIError(status_code=409, detail="Food is already used in meal history and cannot be deleted.")
+
+        session.delete(food)
+        session.commit()
+        return jsonify({"status": "deleted", "id": food_id})
+
+
 @app.post("/eat", strict_slashes=False)
 def eat():
     """
@@ -163,31 +338,27 @@ def eat():
     with Session(engine) as session:
         current_user = _get_current_user_or_raise(session)
 
+        resolved_items: list[tuple[float, Food, str, float, float, float, float]] = []
         parsed_items = parse_meal_text(text)
-        if not parsed_items:
-            raise APIError(
-                status_code=422,
-                detail="Could not parse any food items from text. Examples: '400g skyr', '100g borowki'.",
-            )
+        if parsed_items:
+            foods = session.exec(select(Food)).all()
+            unknown_food = _get_or_create_unknown_food(session)
 
-        foods = session.exec(select(Food)).all()
-        resolved_items: list[tuple[float, Food, str, float, float]] = []
-        unmatched_items: list[str] = []
+            for item in parsed_items:
+                match = match_food(item.food_name, foods)
+                if match:
+                    item_kcal, item_protein, item_carbs, item_fiber = calculate_item_nutrition(match.food, item.grams)
+                    resolved_items.append((item.grams, match.food, match.matched_name, item_kcal, item_protein, item_carbs, item_fiber))
+                    continue
 
-        for item in parsed_items:
-            match = match_food(item.food_name, foods)
-            if not match:
-                unmatched_items.append(item.food_name)
-                continue
+                ai_food = _get_or_create_food_from_ai(session, item.food_name)
+                if ai_food:
+                    foods.append(ai_food)
+                    item_kcal, item_protein, item_carbs, item_fiber = calculate_item_nutrition(ai_food, item.grams)
+                    resolved_items.append((item.grams, ai_food, ai_food.name, item_kcal, item_protein, item_carbs, item_fiber))
+                    continue
 
-            item_kcal, item_protein = calculate_item_nutrition(match.food, item.grams)
-            resolved_items.append((item.grams, match.food, match.matched_name, item_kcal, item_protein))
-
-        if unmatched_items:
-            raise APIError(
-                status_code=422,
-                detail=f"Could not match foods from text: {', '.join(unmatched_items)}",
-            )
+                resolved_items.append((item.grams, unknown_food, item.food_name, 0.0, 0.0, 0.0, 0.0))
 
         meal = Meal(
             user_id=current_user.id,
@@ -195,6 +366,8 @@ def eat():
             raw_text=text,
             total_kcal=0.0,
             total_protein=0.0,
+            total_carbs=0.0,
+            total_fiber=0.0,
         )
         session.add(meal)
         session.commit()
@@ -202,21 +375,29 @@ def eat():
 
         total_kcal = 0.0
         total_protein = 0.0
-        for grams, food, matched_name, item_kcal, item_protein in resolved_items:
+        total_carbs = 0.0
+        total_fiber = 0.0
+        for grams, food, matched_name, item_kcal, item_protein, item_carbs, item_fiber in resolved_items:
             meal_item = MealItem(
                 meal_id=meal.id,
                 food_id=food.id,
                 grams=grams,
                 kcal=item_kcal,
                 protein=item_protein,
+                carbs=item_carbs,
+                fiber=item_fiber,
                 matched_name=matched_name,
             )
             session.add(meal_item)
             total_kcal += item_kcal
             total_protein += item_protein
+            total_carbs += item_carbs
+            total_fiber += item_fiber
 
         meal.total_kcal = total_kcal
         meal.total_protein = total_protein
+        meal.total_carbs = total_carbs
+        meal.total_fiber = total_fiber
         session.add(meal)
         session.commit()
         session.refresh(meal)
@@ -226,8 +407,6 @@ def eat():
 
 @app.get("/oauth/authorize", strict_slashes=False)
 def oauth_authorize():
-    _cleanup_oauth_codes()
-
     redirect_uri = request.args.get("redirect_uri", "").strip()
     state = request.args.get("state", "").strip()
     client_id = request.args.get("client_id", "").strip()
@@ -275,12 +454,18 @@ def oauth_authorize():
             ), 401
 
     code = secrets.token_urlsafe(24)
-    oauth_codes[code] = {
-        "token": token,
-        "redirect_uri": redirect_uri,
-        "client_id": client_id,
-        "expires_at": time.time() + AUTH_CODE_TTL_SECONDS,
-    }
+    with Session(engine) as session:
+        _cleanup_oauth_codes(session)
+        session.add(
+            OAuthAuthorizationCode(
+                code=code,
+                token=token,
+                redirect_uri=redirect_uri,
+                client_id=client_id or None,
+                expires_at=datetime.utcnow() + timedelta(seconds=AUTH_CODE_TTL_SECONDS),
+            )
+        )
+        session.commit()
 
     query_string = urlencode({"code": code, "state": state})
     separator = "&" if "?" in redirect_uri else "?"
@@ -289,8 +474,6 @@ def oauth_authorize():
 
 @app.post("/oauth/token", strict_slashes=False)
 def oauth_token():
-    _cleanup_oauth_codes()
-
     payload = request.form if request.form else (request.get_json(silent=True) or {})
     grant_type = (payload.get("grant_type") or "").strip()
     code = (payload.get("code") or "").strip()
@@ -303,23 +486,31 @@ def oauth_token():
     if not code or not redirect_uri:
         return jsonify({"error": "invalid_request", "error_description": "Missing code or redirect_uri."}), 400
 
-    auth_payload = oauth_codes.pop(code, None)
-    if not auth_payload:
-        return jsonify({"error": "invalid_grant", "error_description": "Authorization code is invalid or expired."}), 400
+    with Session(engine) as session:
+        _cleanup_oauth_codes(session)
+        auth_payload = session.get(OAuthAuthorizationCode, code)
+        if not auth_payload:
+            return jsonify({"error": "invalid_grant", "error_description": "Authorization code is invalid or expired."}), 400
 
-    if float(auth_payload["expires_at"]) <= time.time():
-        return jsonify({"error": "invalid_grant", "error_description": "Authorization code expired."}), 400
+        if auth_payload.expires_at <= datetime.utcnow():
+            session.delete(auth_payload)
+            session.commit()
+            return jsonify({"error": "invalid_grant", "error_description": "Authorization code expired."}), 400
 
-    if auth_payload["redirect_uri"] != redirect_uri:
-        return jsonify({"error": "invalid_grant", "error_description": "redirect_uri mismatch."}), 400
+        if auth_payload.redirect_uri != redirect_uri:
+            return jsonify({"error": "invalid_grant", "error_description": "redirect_uri mismatch."}), 400
 
-    stored_client_id = str(auth_payload.get("client_id") or "")
-    if stored_client_id and stored_client_id != client_id:
-        return jsonify({"error": "invalid_client", "error_description": "client_id mismatch."}), 400
+        stored_client_id = str(auth_payload.client_id or "")
+        if stored_client_id and stored_client_id != client_id:
+            return jsonify({"error": "invalid_client", "error_description": "client_id mismatch."}), 400
+
+        access_token = auth_payload.token
+        session.delete(auth_payload)
+        session.commit()
 
     return jsonify(
         {
-            "access_token": auth_payload["token"],
+            "access_token": access_token,
             "token_type": "Bearer",
             "expires_in": 3600,
         }
@@ -349,6 +540,8 @@ def get_stats_today():
             {
                 "kcal": sum(meal.total_kcal for meal in meals),
                 "protein": sum(meal.total_protein for meal in meals),
+                "carbs": sum(meal.total_carbs for meal in meals),
+                "fiber": sum(meal.total_fiber for meal in meals),
             }
         )
 

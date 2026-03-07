@@ -24,6 +24,8 @@ class Food(SQLModel, table=True):
     aliases: Optional[str] = Field(default=None, max_length=500)
     kcal_per_100g: float = Field(ge=0)
     protein_per_100g: float = Field(ge=0)
+    carbs_per_100g: float = Field(default=0, ge=0)
+    fiber_per_100g: float = Field(default=0, ge=0)
 
 
 class Meal(SQLModel, table=True):
@@ -36,6 +38,8 @@ class Meal(SQLModel, table=True):
     raw_text: str = Field(max_length=5000)
     total_kcal: float = Field(default=0, ge=0)
     total_protein: float = Field(default=0, ge=0)
+    total_carbs: float = Field(default=0, ge=0)
+    total_fiber: float = Field(default=0, ge=0)
     created_at: DateTimeType = Field(default_factory=DateTimeType.utcnow, index=True)
 
 
@@ -48,4 +52,17 @@ class MealItem(SQLModel, table=True):
     grams: float = Field(gt=0)
     kcal: float = Field(ge=0)
     protein: float = Field(ge=0)
+    carbs: float = Field(default=0, ge=0)
+    fiber: float = Field(default=0, ge=0)
     matched_name: str = Field(max_length=255)
+
+
+class OAuthAuthorizationCode(SQLModel, table=True):
+    __tablename__ = "oauth_authorization_codes"
+
+    code: str = Field(primary_key=True, max_length=255)
+    token: str = Field(max_length=8, index=True)
+    redirect_uri: str = Field(max_length=2000)
+    client_id: Optional[str] = Field(default=None, max_length=255)
+    expires_at: DateTimeType = Field(index=True)
+    created_at: DateTimeType = Field(default_factory=DateTimeType.utcnow, index=True)

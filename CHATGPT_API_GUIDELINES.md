@@ -30,13 +30,44 @@ Ten dokument opisuje, jak ChatGPT powinien komunikować się z API projektu `NUT
 }
 ```
 - Zwraca zapisany posiłek wraz z wyliczonymi pozycjami i sumami.
+- Pozycje i sumy obejmują `kcal`, `protein`, `carbs`, `fiber`.
+- Jeśli produkt nie istnieje jeszcze w słowniku i skonfigurowano `GEMINI_API_KEY`, backend spróbuje oszacować wartości przez Gemini, zapisać produkt do `foods` i od razu policzyć wpis.
+- Jeśli AI nie uzupełni produktu, wpis nadal zostanie zapisany, ale ta pozycja dostanie `0` dla wszystkich wartości odżywczych do czasu uzupełnienia słownika.
+- Jeśli parser nie wyciągnie żadnych pozycji, surowy wpis nadal zostanie zapisany w historii z pustą listą pozycji i zerowymi sumami.
 
 ### `GET /meals`
 - Cel: lista posiłków aktualnego użytkownika (od najnowszych).
 - Wymaga `Authorization: Bearer ...`
 
 ### `GET /stats/today`
-- Cel: podsumowanie dnia (`kcal`, `protein`) dla aktualnego użytkownika.
+- Cel: podsumowanie dnia (`kcal`, `protein`, `carbs`, `fiber`) dla aktualnego użytkownika.
+- Wymaga `Authorization: Bearer ...`
+
+### `GET /foods`
+- Cel: pobranie słownika gotowych produktów i potraw.
+- Wymaga `Authorization: Bearer ...`
+
+### `POST /foods`
+- Cel: dodanie nowego produktu do słownika.
+- Wymaga `Authorization: Bearer ...`
+- Body JSON:
+```json
+{
+  "name": "jajko",
+  "aliases": "egg|jajka",
+  "kcal_per_100g": 143,
+  "protein_per_100g": 12.6,
+  "carbs_per_100g": 0.7,
+  "fiber_per_100g": 0
+}
+```
+
+### `PUT /foods/{id}`
+- Cel: edycja istniejącego produktu w słowniku.
+- Wymaga `Authorization: Bearer ...`
+
+### `DELETE /foods/{id}`
+- Cel: usunięcie produktu ze słownika, jeśli nie jest użyty w historii posiłków.
 - Wymaga `Authorization: Bearer ...`
 
 ### `GET /oauth/authorize`
@@ -103,6 +134,14 @@ curl -H "Authorization: Bearer TEST1234" https://mdtest.gembito.net/meals
 curl -H "Authorization: Bearer TEST1234" https://mdtest.gembito.net/stats/today
 ```
 
+### Dodanie produktu do słownika
+```bash
+curl -X POST https://mdtest.gembito.net/foods \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TEST1234" \
+  -d '{"name":"jajko","aliases":"egg|jajka","kcal_per_100g":143,"protein_per_100g":12.6,"carbs_per_100g":0.7,"fiber_per_100g":0}'
+```
+
 ### OAuth authorize
 ```bash
 curl "https://mdtest.gembito.net/oauth/authorize?response_type=code&client_id=test-client&redirect_uri=https%3A%2F%2Fchat.openai.com%2Faip%2Foauth%2Fcallback&state=abc123"
@@ -130,21 +169,20 @@ Reakcja ChatGPT:
 
 ### `422 Unprocessable Entity`
 Najczęściej:
-- parser nie wykrył pozycji jedzenia,
-- API nie dopasowało produktu do słownika `foods`.
+- payload jest błędny lub pusty.
 
 Reakcja ChatGPT:
-- poproś o doprecyzowanie wpisu (np. `200g skyr, 100g banan`),
-- zaproponuj poprawny format z gramaturą i nazwą produktu.
+- poproś o doprecyzowanie wpisu,
+- zaproponuj format z gramaturą i nazwą produktu, jeśli użytkownik chce też liczyć makro.
 
 ## 6) Format odpowiedzi ChatGPT do użytkownika
 Po zapisaniu posiłku:
-- podaj krótkie podsumowanie sumy posiłku (`kcal`, `protein`),
+- podaj krótkie podsumowanie sumy posiłku (`kcal`, `protein`, opcjonalnie `carbs`, `fiber`),
 - opcjonalnie wypisz pozycje (nazwa + gramy),
 - zaproponuj od razu aktualizację statystyk dnia.
 
 Przykład odpowiedzi:
-- „Zapisano posiłek: 309.0 kcal i 44.7 g białka. Chcesz, żebym dodał kolejny wpis?”
+- „Zapisano posiłek: 309.0 kcal, 44.7 g białka, 18.2 g węglowodanów i 3.1 g błonnika. Chcesz, żebym dodał kolejny wpis?”
 
 ## 7) Dobre praktyki promptowania ChatGPT (dla operatora)
 - Podawaj token na początku rozmowy.
@@ -158,6 +196,6 @@ Przykład odpowiedzi:
 - `POST /eat` zapisuje posiłek na bieżącą datę serwera.
 - Brak endpointu do edycji wpisu.
 - Brak endpointu do usuwania wpisu.
-- Brak endpointów administracyjnych do zarządzania słownikiem `foods`.
-- OAuth korzysta z tymczasowych kodów trzymanych w pamięci procesu (TTL 5 minut).
+- AI enrichment wymaga skonfigurowanego `GEMINI_API_KEY` i poprawnego modelu Gemini.
+- OAuth korzysta z tymczasowych kodów zapisanych w SQLite (TTL 5 minut, jednorazowe użycie).
 - Endpoint `/oauth/authorize` akceptuje standardowe `response_type=code` oraz tymczasowo także starsze `authorization_code` dla kompatybilności wstecznej.

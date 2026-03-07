@@ -98,7 +98,9 @@ def match_food(food_name: str, foods: Iterable[Food]) -> Optional[FoodMatch]:
     return exact_match or best_partial
 
 
-def calculate_item_nutrition(food: Food, grams: float) -> tuple[float, float]:
+def calculate_item_nutrition(food: Food, grams: float) -> tuple[float, float, float, float]:
     kcal = (food.kcal_per_100g * grams) / 100.0
     protein = (food.protein_per_100g * grams) / 100.0
-    return kcal, protein
+    carbs = (food.carbs_per_100g * grams) / 100.0
+    fiber = (food.fiber_per_100g * grams) / 100.0
+    return kcal, protein, carbs, fiber
