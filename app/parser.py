@@ -35,34 +35,52 @@ def split_aliases(aliases: Optional[str]) -> list[str]:
         return []
     return [part.strip() for part in aliases.split("|") if part.strip()]
 
+
+def _parse_weighted_part(part: str) -> Optional[ParsedItem]:
+    weight_matches = list(WEIGHT_PATTERN.finditer(part))
+    if len(weight_matches) != 1:
+        return None
+
+    weight_match = weight_matches[0]
+    grams_value = float(weight_match.group(1).replace(',', '.'))
+    unit = weight_match.group(2).lower()
+    grams = grams_value * 1000 if unit == "kg" else grams_value
+    name = part.replace(weight_match.group(0), ' ').strip()
+    name = re.sub(r'^(z|i|ze)\s+', '', name)
+    name = re.sub(r'\s+', ' ', name).strip(' ,;+')
+    if not name:
+        return None
+
+    return ParsedItem(food_name=normalize_text(name), grams=grams)
+
+
 def parse_meal_text(text: str) -> List[ParsedItem]:
     """
     Prosty parser wyciągający gramaturę i nazwę produktu.
     Obsługuje formaty typu: "400g skyr", "skyr 400g", "100g borowki".
     """
     items = []
-    # Rozdzielamy po "i", ",", ";", "+" lub nowej linii
-    parts = re.split(r"\s+i\s+|,|;|\+|\n", text)
-    
+    # Najpierw rozdzielamy po mocnych separatorach. Segment z jednym ciezarem
+    # moze opisywac gotowy przepis, np. "kurczak i ryz 350g".
+    parts = re.split(r",|;|\+|\n", text)
+
     for part in parts:
         part = part.strip()
         if not part:
             continue
-            
-        # Szukamy liczby z jednostką (np. 400g, 400 g, 0.4kg)
-        weight_match = WEIGHT_PATTERN.search(part)
-        
-        if weight_match:
-            grams_value = float(weight_match.group(1).replace(',', '.'))
-            unit = weight_match.group(2).lower()
-            grams = grams_value * 1000 if unit == "kg" else grams_value
-            # Usuwamy gramaturę z tekstu, aby została sama nazwa
-            name = part.replace(weight_match.group(0), '').strip()
-            # Usuwamy zbędne słowa i znaki
-            name = re.sub(r'^(z|i|ze)\s+', '', name)
-            if name:
-                items.append(ParsedItem(food_name=normalize_text(name), grams=grams))
-                
+
+        parsed_item = _parse_weighted_part(part)
+        if parsed_item:
+            items.append(parsed_item)
+            continue
+
+        # Gdy w jednym segmencie jest kilka wag, traktujemy "i" jako separator pozycji.
+        nested_parts = re.split(r"\s+i\s+", part)
+        for nested_part in nested_parts:
+            parsed_nested_item = _parse_weighted_part(nested_part.strip())
+            if parsed_nested_item:
+                items.append(parsed_nested_item)
+
     return items
 
 

@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 import html
 import os
+import re
 import secrets
 from urllib.parse import urlencode, urlparse
 
@@ -167,10 +168,48 @@ def _get_or_create_unknown_food(session: Session) -> Food:
     return unknown_food
 
 
+def _clean_food_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _prepare_aliases(name: str, raw_aliases: str) -> str:
+    normalized_name = normalize_text(name)
+    seen_aliases: set[str] = set()
+    cleaned_aliases: list[str] = []
+
+    for alias in raw_aliases.split("|"):
+        cleaned_alias = _clean_food_text(alias)
+        if not cleaned_alias:
+            continue
+
+        normalized_alias = normalize_text(cleaned_alias)
+        if not normalized_alias or normalized_alias == normalized_name or normalized_alias in seen_aliases:
+            continue
+
+        seen_aliases.add(normalized_alias)
+        cleaned_aliases.append(cleaned_alias)
+
+    return "|".join(cleaned_aliases)
+
+
+def _find_food_by_normalized_name(session: Session, food_name: str, exclude_id: int | None = None) -> Food | None:
+    normalized_name = normalize_text(food_name)
+    if not normalized_name:
+        return None
+
+    foods = session.exec(select(Food)).all()
+    for food in foods:
+        if exclude_id is not None and food.id == exclude_id:
+            continue
+        if normalize_text(food.name) == normalized_name:
+            return food
+    return None
+
+
 def _get_food_payload() -> dict:
     payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name") or "").strip()
-    aliases = str(payload.get("aliases") or "").strip()
+    name = _clean_food_text(payload.get("name") or "")
+    aliases = _prepare_aliases(name, str(payload.get("aliases") or ""))
 
     try:
         kcal_per_100g = float(payload.get("kcal_per_100g"))
@@ -207,7 +246,7 @@ def _get_or_create_food_from_ai(session: Session, food_name: str) -> Food | None
     if not estimate or not estimate.normalized_name or estimate.normalized_name == UNKNOWN_FOOD_NAME:
         return None
 
-    existing_food = session.exec(select(Food).where(Food.name == estimate.normalized_name)).first()
+    existing_food = _find_food_by_normalized_name(session, estimate.normalized_name)
     if existing_food:
         return existing_food
 
@@ -270,7 +309,7 @@ def create_food():
 
     with Session(engine) as session:
         _get_current_user_or_raise(session)
-        existing_food = session.exec(select(Food).where(Food.name == payload["name"])).first()
+        existing_food = _find_food_by_normalized_name(session, payload["name"])
         if existing_food:
             raise APIError(status_code=409, detail="Food with this name already exists.")
 
@@ -291,9 +330,7 @@ def update_food(food_id: int):
         if not food or food.name == UNKNOWN_FOOD_NAME:
             raise APIError(status_code=404, detail="Food not found.")
 
-        duplicate_food = session.exec(
-            select(Food).where(Food.name == payload["name"], Food.id != food_id)
-        ).first()
+        duplicate_food = _find_food_by_normalized_name(session, payload["name"], exclude_id=food_id)
         if duplicate_food:
             raise APIError(status_code=409, detail="Another food with this name already exists.")
 

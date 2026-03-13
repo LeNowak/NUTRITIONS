@@ -13,8 +13,8 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
     genai = None
 
 
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.0-flash")
-
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "ggemini-3.1-flash-lite-preview")
+HARDCODED_GEMINI_API_KEY = "AIzaSyBB9aUa9s52BknycCP1Fkzf-5xi8Rps7aI"
 
 @dataclass
 class NutritionEstimate:
@@ -35,7 +35,7 @@ def _extract_json_payload(raw_text: str) -> dict:
 
 
 def estimate_food_nutrition(food_name: str) -> Optional[NutritionEstimate]:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = HARDCODED_GEMINI_API_KEY.strip()
     if not api_key or genai is None:
         return None
 
