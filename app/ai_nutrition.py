@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 
 
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "ggemini-3.1-flash-lite-preview")
-HARDCODED_GEMINI_API_KEY = "AIzaSyBB9aUa9s52BknycCP1Fkzf-5xi8Rps7aI"
+HARDCODED_GEMINI_API_KEY = ""
 
 @dataclass
 class NutritionEstimate:
